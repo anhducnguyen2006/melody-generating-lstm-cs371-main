@@ -1,0 +1,431 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="slides-format" content="viewport">
+  <title>LSTM MIDI Music Generation Project</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+  <style type="text/tailwindcss">
+    @theme {
+      --color-bg: #0f0a2a;
+      --color-bg-deep: #0a192f;
+      --color-surface: #1b1640;
+      --color-text: #f8fafc;
+      --color-text-secondary: #cbd5e1;
+      --color-text-muted: #94a3b8;
+      --color-accent-1: #7c3aed;
+      --color-accent-2: #06b6d4;
+      --color-accent-3: #a78bfa;
+      --color-glass-bg: rgba(255,255,255,0.06);
+      --color-glass-border: rgba(255,255,255,0.10);
+      --color-vignette: rgba(0,0,0,0.42);
+      --font-display: 'Instrument Serif', serif;
+      --font-body: 'Inter', sans-serif;
+    }
+  </style>
+  <style>
+    :root { --color-bg: #0f0a2a; --color-text: #f8fafc; --glow-color-rgb: 124,58,237; }
+    *, *::before, *::after { box-sizing: border-box; }
+    html, body { background: var(--color-bg); margin: 0; }
+    body { font-family: var(--font-body); color: var(--color-text); overflow: hidden; height: 100vh; width: 100vw; }
+    .deck { width: 100vw; height: 100vh; position: relative; }
+    .slide { position: absolute; inset: 0; background: var(--color-bg); display: flex; flex-direction: column; align-items: center; justify-content: center; opacity: 0; transform: scale(0.95); transition: opacity 0.7s ease, transform 0.7s ease; pointer-events: none; overflow: hidden; }
+    .slide.active { opacity: 1; transform: scale(1); pointer-events: all; }
+    .slide > .content { position: relative; z-index: 2; width: 100%; max-width: 1180px; padding: clamp(1.5rem, 4vw, 3.2rem); }
+    .nav-controls { position: fixed; bottom: 26px; left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 16px; z-index: 100; background: rgba(255,255,255,0.08); backdrop-filter: blur(10px); padding: 10px 24px; border-radius: 40px; border: 1px solid rgba(255,255,255,0.1); }
+    .nav-btn { width: 40px; height: 40px; border: none; background: rgba(255,255,255,0.08); color: var(--color-accent-2); border-radius: 50%; font-size: 1.2rem; cursor: pointer; }
+    .slide-dots { display: flex; gap: 8px; }
+    .slide-dots .dot { width: 10px; height: 10px; border-radius: 50%; background: rgba(255,255,255,0.15); cursor: pointer; transition: background 0.3s, transform 0.3s; }
+    .slide-dots .dot.active { background: var(--color-accent-2); transform: scale(1.3); }
+    .slide-counter { font-size: 0.8rem; color: var(--color-text-muted); min-width: 50px; text-align: center; }
+    .reveal { opacity: 0; transform: translateY(20px); }
+    .gradient-mesh { position: absolute; inset: 0; z-index: 0; overflow: hidden; pointer-events: none; }
+    .blob { position: absolute; border-radius: 50%; filter: blur(80px); animation: float-slow 12s ease-in-out infinite; }
+    .blob:nth-child(2) { animation: float-drift 16s ease-in-out infinite; }
+    .blob:nth-child(3) { animation: float-slow 18s ease-in-out infinite reverse; }
+    @keyframes float-slow { 0% { transform: translate(0,0) scale(1);} 25% { transform: translate(50px,-40px) scale(1.1);} 50% { transform: translate(-30px,30px) scale(0.92);} 75% { transform: translate(30px,20px) scale(1.04);} 100% { transform: translate(0,0) scale(1);} }
+    @keyframes float-drift { 0% { transform: translate(0,0) scale(1) rotate(0deg);} 33% { transform: translate(-50px,-60px) scale(1.1) rotate(3deg);} 66% { transform: translate(40px,30px) scale(0.9) rotate(-2deg);} 100% { transform: translate(0,0) scale(1) rotate(0deg);} }
+    @keyframes float { 0%,100% { transform: translateY(0);} 50% { transform: translateY(-14px);} }
+    .slide::before { content:''; position:absolute; inset:0; z-index:1; pointer-events:none; background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 512 512' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.7' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.04'/%3E%3C/svg%3E"); background-repeat:repeat; background-size:256px 256px; opacity:0.03; mix-blend-mode:overlay; }
+    .slide::after { content:''; position:absolute; inset:0; z-index:1; pointer-events:none; background: radial-gradient(ellipse at center, transparent 50%, var(--color-vignette) 100%); }
+    .text-glow { text-shadow: 0 0 20px rgba(var(--glow-color-rgb),0.45), 0 0 40px rgba(var(--glow-color-rgb),0.2); }
+    .stat-card, .glass-card { background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.1); backdrop-filter: blur(14px); border-radius: 24px; }
+    .bar-track { background: rgba(255,255,255,0.08); border-radius: 999px; height: 18px; overflow: hidden; }
+    .bar-fill { height: 100%; border-radius: 999px; background: linear-gradient(90deg, var(--color-accent-1), var(--color-accent-2)); width: 0%; }
+    .pipeline-step { position: relative; padding: 1rem 1rem 1rem 1.2rem; border-left: 3px solid rgba(6,182,212,0.7); }
+    .mini-pill { display:inline-block; padding: 0.35rem 0.7rem; border-radius: 999px; background: rgba(255,255,255,0.08); border:1px solid rgba(255,255,255,0.08); font-size: 0.78rem; color: var(--color-text-secondary); }
+    .architecture-box { min-height: 132px; }
+    .matrix { display:grid; grid-template-columns: 1.1fr 1fr 1fr; gap:10px; }
+    .matrix > div { padding: 0.8rem; border-radius: 16px; background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.08); }
+    .seed-flow { display:grid; grid-template-columns: repeat(5,1fr); gap:12px; }
+    .seed-flow .node { padding: 0.8rem; border-radius: 18px; text-align:center; background: rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.08); }
+    .mouse-spotlight { position:fixed; inset:0; z-index:99; pointer-events:none; }
+    @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.2s !important; } }
+  </style>
+</head>
+<body>
+<div class="mouse-spotlight"></div>
+<div class="deck">
+  <div class="slide slide-1 active" data-slide="1">
+    <div class="gradient-mesh">
+      <div class="blob" style="width:500px;height:500px;top:-120px;right:-100px;background:var(--color-accent-1);opacity:0.16;"></div>
+      <div class="blob" style="width:320px;height:320px;bottom:-80px;left:-60px;background:var(--color-accent-2);opacity:0.13;"></div>
+      <div class="blob" style="width:220px;height:220px;top:42%;left:12%;background:var(--color-accent-3);opacity:0.11;"></div>
+    </div>
+    <canvas class="particle-canvas" style="position:absolute;inset:0;z-index:1;"></canvas>
+    <div class="content text-center">
+      <div class="text-[120px] mb-5 animate-[float_3s_ease-in-out_infinite] mx-auto reveal">🎹</div>
+      <h1 class="font-display text-[clamp(2.6rem,6vw,5.2rem)] font-black bg-linear-to-br from-accent-1 via-accent-2 to-accent-1 bg-clip-text text-transparent tracking-tight mb-4 reveal">LSTM MIDI Music Generation</h1>
+      <p class="text-[clamp(0.78rem,1.15vw,1.02rem)] font-light text-text-muted tracking-[3px] reveal" style="max-width:1100px; line-height:1.55; margin:0 auto;">Sunny Ho, Bealu Kebede, Anaya Koirala, Andy Nguyen, Toai Nguyen Quoc Cong, Konstantin Vassilyeva</p>
+    </div>
+  </div>
+
+  <div class="slide slide-2" data-slide="2">
+    <div class="gradient-mesh">
+      <div class="blob" style="width:340px;height:340px;top:-70px;right:-70px;background:var(--color-accent-1);opacity:0.08;"></div>
+      <div class="blob" style="width:250px;height:250px;bottom:-60px;left:-50px;background:var(--color-accent-2);opacity:0.06;"></div>
+    </div>
+    <div class="content">
+      <p class="mini-pill reveal mb-5">Project overview</p>
+      <h2 class="font-display text-[clamp(2rem,4.2vw,3.1rem)] font-bold reveal mb-6">What the team is building</h2>
+      <div class="grid grid-cols-2 gap-6">
+        <div class="glass-card p-8 reveal">
+          <h3 class="text-2xl font-semibold text-accent-2 mb-4">Core idea</h3>
+          <p class="text-lg text-text-secondary leading-relaxed">Train an LSTM on melody tokens extracted from MIDI piano music, then use a short seed melody to generate new token sequences and export them back to MIDI files.</p>
+        </div>
+        <div class="glass-card p-8 reveal">
+          <h3 class="text-2xl font-semibold text-accent-2 mb-4">Notebook scope</h3>
+          <ul class="space-y-3 text-lg text-text-secondary leading-relaxed">
+            <li>Dataset filtering from MAESTRO for Frédéric Chopin.</li>
+            <li>Melody extraction from full piano scores.</li>
+            <li>Tokenization, LSTM training, and MIDI generation.</li>
+            <li>Testing with held-out seed files from the test split.</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="slide slide-4" data-slide="4">
+    <div class="gradient-mesh">
+      <div class="blob" style="width:320px;height:320px;top:-70px;right:-70px;background:var(--color-accent-1);opacity:0.08;"></div>
+      <div class="blob" style="width:250px;height:250px;bottom:-60px;left:-40px;background:var(--color-accent-2);opacity:0.06;"></div>
+    </div>
+    <div class="content">
+      <p class="mini-pill reveal mb-5">Model concept</p>
+      <h2 class="font-display text-[clamp(2rem,4.2vw,3rem)] font-bold reveal mb-6">What is LSTM?</h2>
+      <div class="grid grid-cols-2 gap-6">
+        <div class="glass-card p-8 reveal">
+          <h3 class="text-2xl font-semibold text-accent-2 mb-4">Simple definition</h3>
+          <p class="text-lg text-text-secondary leading-relaxed">LSTM stands for Long Short-Term Memory. It is a recurrent neural network architecture built for sequential data, so it can learn from what happened earlier in a sequence.</p>
+          <p class="text-lg text-text-secondary leading-relaxed mt-4">In music generation, this helps because melody depends on earlier notes, rests, rhythm, and phrase direction rather than isolated events.</p>
+        </div>
+        <div class="glass-card p-8 reveal">
+          <h3 class="text-2xl font-semibold text-accent-2 mb-4">Why this model fits</h3>
+          <ul class="space-y-3 text-lg text-text-secondary leading-relaxed">
+            <li>Captures time-dependent musical patterns.</li>
+            <li>Uses prior context to predict the next token.</li>
+            <li>Handles fixed windows of 64 melody steps in this project.</li>
+            <li>Works well for seed-based continuation of MIDI melodies.</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="slide slide-3" data-slide="3">
+    <div class="gradient-mesh">
+      <div class="blob" style="width:300px;height:300px;top:-60px;left:5%;background:var(--color-accent-3);opacity:0.08;"></div>
+      <div class="blob" style="width:280px;height:280px;bottom:-80px;right:0;background:var(--color-accent-2);opacity:0.06;"></div>
+    </div>
+    <div class="content">
+      <p class="mini-pill reveal mb-5">End-to-end pipeline</p>
+      <h2 class="font-display text-[clamp(2rem,4.2vw,3rem)] font-bold reveal mb-6">System workflow</h2>
+      <div class="grid grid-cols-3 gap-5">
+        <div class="glass-card p-6 reveal"><div class="text-3xl mb-3">1</div><h3 class="text-xl font-semibold mb-2">Filter source data</h3><p class="text-text-secondary">Read MAESTRO metadata, keep Chopin files only, and copy them into train, validation, and test folders.</p></div>
+        <div class="glass-card p-6 reveal"><div class="text-3xl mb-3">2</div><h3 class="text-xl font-semibold mb-2">Extract melody</h3><p class="text-text-secondary">Flatten each MIDI score and select one melodic note per onset while preserving tempo, time signature, key, and rests.</p></div>
+        <div class="glass-card p-6 reveal"><div class="text-3xl mb-3">3</div><h3 class="text-xl font-semibold mb-2">Tokenize sequence</h3><p class="text-text-secondary">Encode notes as MIDI pitches, rests as <span class="text-accent-2">r</span>, and sustained durations as continuation token <span class="text-accent-2">_</span>.</p></div>
+        <div class="glass-card p-6 reveal"><div class="text-3xl mb-3">4</div><h3 class="text-xl font-semibold mb-2">Train LSTM</h3><p class="text-text-secondary">Use sliding windows of length 64, one-hot inputs, one LSTM layer with 256 units, and dropout.</p></div>
+        <div class="glass-card p-6 reveal"><div class="text-3xl mb-3">5</div><h3 class="text-xl font-semibold mb-2">Generate continuation</h3><p class="text-text-secondary">Prompt the model with a short seed melody, sample the next tokens with temperature control, and stop on a delimiter token.</p></div>
+        <div class="glass-card p-6 reveal"><div class="text-3xl mb-3">6</div><h3 class="text-xl font-semibold mb-2">Write MIDI output</h3><p class="text-text-secondary">Merge note and continuation tokens back into notes and rests, then save generated files in the results directory.</p></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="slide slide-5" data-slide="5">
+    <div class="gradient-mesh">
+      <div class="blob" style="width:360px;height:360px;top:-90px;right:-90px;background:var(--color-accent-1);opacity:0.08;"></div>
+      <div class="blob" style="width:260px;height:260px;bottom:-70px;left:-40px;background:var(--color-accent-2);opacity:0.06;"></div>
+    </div>
+    <div class="content">
+      <p class="mini-pill reveal mb-5">Data preprocessing</p>
+      <h2 class="font-display text-[clamp(2rem,4.2vw,3rem)] font-bold reveal mb-6">Dataset preparation</h2>
+      <div class="grid grid-cols-[1.2fr_0.8fr] gap-6 items-stretch">
+        <div class="glass-card p-8 reveal">
+          <div class="space-y-4 text-lg text-text-secondary">
+            <div class="pipeline-step"><strong class="text-white">Source:</strong> MAESTRO v3.0.0 metadata CSV and MIDI files.</div>
+            <div class="pipeline-step"><strong class="text-white">Filter:</strong> keep only rows where <span class="text-accent-2">canonical_composer = Frédéric Chopin</span>.</div>
+            <div class="pipeline-step"><strong class="text-white">Split:</strong> preserve MAESTRO split labels for train, validation, and test folders.</div>
+            <div class="pipeline-step"><strong class="text-white">Outputs:</strong> create <span class="text-accent-2">dataset/unprocessed_...</span>, <span class="text-accent-2">dataset/melodies</span>, and a filtered metadata CSV.</div>
+          </div>
+        </div>
+        <div class="grid grid-rows-3 gap-4">
+          <div class="stat-card p-6 reveal flex flex-col justify-center"><div class="text-4xl text-glow font-extrabold mb-2">Train</div><div class="text-text-secondary">Model learns on melody sequences from this split.</div></div>
+          <div class="stat-card p-6 reveal flex flex-col justify-center"><div class="text-4xl text-glow font-extrabold mb-2">Validation</div><div class="text-text-secondary">Used during fitting to monitor generalization each epoch.</div></div>
+          <div class="stat-card p-6 reveal flex flex-col justify-center"><div class="text-4xl text-glow font-extrabold mb-2">Test</div><div class="text-text-secondary">Used later as seed sources for generation examples.</div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="slide slide-6" data-slide="6">
+    <div class="gradient-mesh">
+      <div class="blob" style="width:300px;height:300px;top:-60px;left:-60px;background:var(--color-accent-2);opacity:0.07;"></div>
+      <div class="blob" style="width:300px;height:300px;bottom:-70px;right:-50px;background:var(--color-accent-1);opacity:0.07;"></div>
+    </div>
+    <div class="content">
+      <p class="mini-pill reveal mb-5">Feature engineering</p>
+      <h2 class="font-display text-[clamp(2rem,4.2vw,3rem)] font-bold reveal mb-6">Melody extraction logic</h2>
+      <div class="grid grid-cols-2 gap-6">
+        <div class="glass-card p-8 reveal">
+          <h3 class="text-2xl font-semibold mb-4 text-accent-2">Musical assumptions</h3>
+          <ul class="space-y-3 text-lg text-text-secondary">
+            <li>Melody is usually in the right hand, so notes at or above C4 are preferred.</li>
+            <li>If multiple notes start together, the algorithm selects one representative melodic pitch.</li>
+            <li>Pitch continuity matters, so large jumps are penalized.</li>
+            <li>Rests are inserted to preserve phrasing between note events.</li>
+          </ul>
+        </div>
+        <div class="glass-card p-8 reveal">
+          <h3 class="text-2xl font-semibold mb-4 text-accent-2">Context preserved</h3>
+          <ul class="space-y-3 text-lg text-text-secondary">
+            <li>Tempo marks are copied into the new melody track.</li>
+            <li>Time signatures remain available for rhythmic structure.</li>
+            <li>Key signatures keep the tonal context of the original piece.</li>
+            <li>Velocity is retained so dynamics are not completely lost.</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="slide slide-7" data-slide="7">
+    <div class="gradient-mesh">
+      <div class="blob" style="width:350px;height:350px;top:-90px;right:-60px;background:var(--color-accent-3);opacity:0.08;"></div>
+      <div class="blob" style="width:240px;height:240px;bottom:-50px;left:-50px;background:var(--color-accent-2);opacity:0.06;"></div>
+    </div>
+    <canvas class="particle-canvas-ambient" style="position:absolute;inset:0;z-index:1;"></canvas>
+    <div class="content">
+      <p class="mini-pill reveal mb-5">Sequence representation</p>
+      <h2 class="font-display text-[clamp(2rem,4.2vw,3rem)] font-bold reveal mb-6">How MIDI becomes LSTM tokens</h2>
+      <div class="grid grid-cols-[0.95fr_1.05fr] gap-6 items-center">
+        <div class="glass-card p-8 reveal architecture-box">
+          <h3 class="text-2xl font-semibold text-accent-2 mb-4">Token rules</h3>
+          <div class="space-y-3 text-lg text-text-secondary">
+            <div><span class="mini-pill">60, 62, 64...</span> note-on events as MIDI pitch values</div>
+            <div><span class="mini-pill">r</span> rest token</div>
+            <div><span class="mini-pill">_</span> continuation of the current note or rest</div>
+            <div><span class="mini-pill">/</span> delimiter repeated 64 times between files</div>
+          </div>
+        </div>
+        <div class="glass-card p-8 reveal architecture-box">
+          <h3 class="text-2xl font-semibold text-accent-2 mb-4">Time resolution</h3>
+          <p class="text-lg text-text-secondary leading-relaxed mb-4">Each token step uses <span class="text-accent-2 font-semibold">TIME_STEP = 0.25</span>, so duration is discretized into quarter-beat steps. The model sees fixed windows of 64 previous tokens and predicts the very next token.</p>
+          <div class="seed-flow mt-4">
+            <div class="node">60</div>
+            <div class="node">_</div>
+            <div class="node">_</div>
+            <div class="node">r</div>
+            <div class="node">62</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="slide slide-8" data-slide="8">
+    <div class="gradient-mesh">
+      <div class="blob" style="width:320px;height:320px;top:-60px;left:5%;background:var(--color-accent-1);opacity:0.07;"></div>
+      <div class="blob" style="width:260px;height:260px;bottom:-70px;right:0;background:var(--color-accent-2);opacity:0.07;"></div>
+    </div>
+    <div class="content">
+      <p class="mini-pill reveal mb-5">Model design</p>
+      <h2 class="font-display text-[clamp(2rem,4.2vw,3rem)] font-bold reveal mb-6">LSTM architecture and training setup</h2>
+      <div class="grid grid-cols-4 gap-4 mb-5">
+        <div class="stat-card p-5 reveal text-center"><div class="text-4xl font-extrabold text-glow mb-2">64</div><div class="uppercase text-sm tracking-[3px] text-text-muted">Sequence length</div></div>
+        <div class="stat-card p-5 reveal text-center"><div class="text-4xl font-extrabold text-glow mb-2">64</div><div class="uppercase text-sm tracking-[3px] text-text-muted">Batch size</div></div>
+        <div class="stat-card p-5 reveal text-center"><div class="text-4xl font-extrabold text-glow mb-2">10</div><div class="uppercase text-sm tracking-[3px] text-text-muted">Epochs</div></div>
+        <div class="stat-card p-5 reveal text-center"><div class="text-4xl font-extrabold text-glow mb-2">256</div><div class="uppercase text-sm tracking-[3px] text-text-muted">LSTM units</div></div>
+      </div>
+      <div class="grid grid-cols-3 gap-5">
+        <div class="glass-card p-6 reveal"><h3 class="text-xl font-semibold mb-3 text-accent-2">Input</h3><p class="text-text-secondary">One-hot encoded tensors with shape <span class="text-white">[64, vocab_size]</span>.</p></div>
+        <div class="glass-card p-6 reveal"><h3 class="text-xl font-semibold mb-3 text-accent-2">Network</h3><p class="text-text-secondary">One LSTM layer (256 units), dropout 0.2, then a dense softmax output over the token vocabulary.</p></div>
+        <div class="glass-card p-6 reveal"><h3 class="text-xl font-semibold mb-3 text-accent-2">Optimization</h3><p class="text-text-secondary">Adam optimizer with learning rate 0.002 and sparse categorical cross-entropy loss.</p></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="slide slide-9" data-slide="9">
+    <div class="gradient-mesh">
+      <div class="blob" style="width:320px;height:320px;top:-70px;right:-50px;background:var(--color-accent-2);opacity:0.08;"></div>
+      <div class="blob" style="width:250px;height:250px;bottom:-50px;left:-40px;background:var(--color-accent-1);opacity:0.06;"></div>
+    </div>
+    <div class="content">
+      <p class="mini-pill reveal mb-5">Generation phase</p>
+      <h2 class="font-display text-[clamp(2rem,4.2vw,3rem)] font-bold reveal mb-6">Seed-to-song generation</h2>
+      <div class="grid grid-cols-[1.1fr_0.9fr] gap-6">
+        <div class="glass-card p-8 reveal">
+          <div class="seed-flow mb-5">
+            <div class="node">Test MIDI</div>
+            <div class="node">First 8 quarter lengths</div>
+            <div class="node">64-token context</div>
+            <div class="node">Temperature sampling</div>
+            <div class="node">Generated MIDI</div>
+          </div>
+          <ul class="space-y-3 text-lg text-text-secondary">
+            <li>Seed melodies come from the test split.</li>
+            <li>Only the first <span class="text-accent-2">5.0 seconds</span> are kept as the prompt.</li>
+            <li>The model can generate up to <span class="text-accent-2">300</span> new tokens.</li>
+            <li>Sampling uses <span class="text-accent-2">temperature = 0.3</span> for stable continuations.</li>
+          </ul>
+        </div>
+        <div class="glass-card p-8 reveal">
+          <h3 class="text-2xl font-semibold mb-4 text-accent-2">Output reconstruction</h3>
+          <p class="text-lg text-text-secondary leading-relaxed mb-4">During decoding, note tokens start events and underscore tokens extend their duration. The algorithm rebuilds notes and rests into a music21 stream, then exports a new MIDI file into the results directory.</p>
+          <div class="grid grid-cols-2 gap-4 mt-5">
+            <div class="stat-card p-5 text-center"><div class="text-3xl font-bold text-glow mb-2">10</div><div class="text-text-secondary">Random seed files</div></div>
+            <div class="stat-card p-5 text-center"><div class="text-3xl font-bold text-glow mb-2">42</div><div class="text-text-secondary">Fixed RNG seed</div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="slide slide-10" data-slide="10">
+    <div class="gradient-mesh">
+      <div class="blob" style="width:330px;height:330px;top:-80px;left:-40px;background:var(--color-accent-3);opacity:0.08;"></div>
+      <div class="blob" style="width:260px;height:260px;bottom:-60px;right:-50px;background:var(--color-accent-2);opacity:0.06;"></div>
+    </div>
+    <div class="content">
+      <p class="mini-pill reveal mb-5">Results showcase</p>
+      <h2 class="font-display text-[clamp(2rem,4.2vw,3rem)] font-bold reveal mb-6">Generated songs (played separately)</h2>
+      <div class="grid grid-cols-2 gap-6">
+        <div class="glass-card p-8 reveal">
+          <h3 class="text-2xl font-semibold mb-4 text-accent-2">What we will demo live</h3>
+          <div class="space-y-4 text-text-secondary text-lg">
+            <div class="pipeline-step">Selected generated MIDI files from the model output folder.</div>
+            <div class="pipeline-step">A/B comparison between seed melody and continuation.</div>
+            <div class="pipeline-step">Examples from German folk songs and Chopin-focused runs.</div>
+            <div class="pipeline-step">Quick listening notes: phrasing, repetition, and melodic contour.</div>
+          </div>
+        </div>
+        <div class="glass-card p-8 reveal">
+          <h3 class="text-2xl font-semibold mb-4 text-accent-2">Shown outside the slides</h3>
+          <div class="space-y-4 text-text-secondary text-lg">
+            <div class="pipeline-step" style="border-left-color: rgba(167,139,250,0.7);">Audio/MIDI playback during presentation (not embedded here).</div>
+            <div class="pipeline-step" style="border-left-color: rgba(167,139,250,0.7);">Representative files from `results/90-epochs` and `results/chopin-dataset`.</div>
+            <div class="pipeline-step" style="border-left-color: rgba(167,139,250,0.7);">Short clips to highlight both strong and weak outputs.</div>
+            <div class="pipeline-step" style="border-left-color: rgba(167,139,250,0.7);">Discussion of musical quality happens in the live demo segment.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="slide slide-11" data-slide="11">
+    <div class="gradient-mesh">
+      <div class="blob" style="width:340px;height:340px;top:-70px;right:-50px;background:var(--color-accent-1);opacity:0.08;"></div>
+      <div class="blob" style="width:250px;height:250px;bottom:-60px;left:-50px;background:var(--color-accent-2);opacity:0.06;"></div>
+    </div>
+    <canvas class="particle-canvas-ambient" style="position:absolute;inset:0;z-index:1;"></canvas>
+    <div class="content">
+      <p class="mini-pill reveal mb-5">Retrospective</p>
+      <h2 class="font-display text-[clamp(2rem,4.2vw,3rem)] font-bold reveal mb-6">Challenges and future improvements</h2>
+      <div class="grid grid-cols-3 gap-5">
+        <div class="glass-card p-7 reveal"><div class="text-4xl mb-4">⚠️</div><h3 class="text-xl font-semibold mb-3">What we ran into</h3><p class="text-text-secondary">The model does not run well on the Chopin subset yet: outputs can become repetitive, unstable, or lose coherent phrasing.</p></div>
+        <div class="glass-card p-7 reveal"><div class="text-4xl mb-4">🧪</div><h3 class="text-xl font-semibold mb-3">Likely causes</h3><p class="text-text-secondary">Limited and stylistically complex data, heuristic melody extraction, and a simple single-layer LSTM setup constrain expressive modeling.</p></div>
+        <div class="glass-card p-7 reveal"><div class="text-4xl mb-4">🚀</div><h3 class="text-xl font-semibold mb-3">Recommendations</h3><p class="text-text-secondary">Expand and clean data, improve melody/chord representation, tune sequence length and temperature, and compare against Transformer-based baselines.</p></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="slide slide-12" data-slide="12">
+    <div class="gradient-mesh">
+      <div class="blob" style="width:500px;height:500px;top:-120px;right:-100px;background:var(--color-accent-1);opacity:0.15;"></div>
+      <div class="blob" style="width:320px;height:320px;bottom:-80px;left:-60px;background:var(--color-accent-2);opacity:0.12;"></div>
+      <div class="blob" style="width:200px;height:200px;top:35%;left:18%;background:var(--color-accent-3);opacity:0.10;"></div>
+    </div>
+    <canvas class="particle-canvas" style="position:absolute;inset:0;z-index:1;"></canvas>
+    <div class="content text-center">
+      <div class="text-[110px] mb-5 animate-[float_3s_ease-in-out_infinite] mx-auto">🎶</div>
+      <h2 class="font-display text-[clamp(2.5rem,5vw,4.4rem)] font-black bg-linear-to-br from-accent-1 via-accent-2 to-accent-1 bg-clip-text text-transparent tracking-tight mb-4 reveal">Thank You</h2>
+      <p class="text-[clamp(0.9rem,1.4vw,1.2rem)] text-text-muted tracking-[5px] uppercase reveal">Questions on dataset, model design, or generated music output</p>
+    </div>
+  </div>
+</div>
+
+<div class="nav-controls">
+  <button class="nav-btn" aria-label="Previous slide" onclick="changeSlide(-1)">&#8249;</button>
+  <div class="slide-dots" id="dots"></div>
+  <button class="nav-btn" aria-label="Next slide" onclick="changeSlide(1)">&#8250;</button>
+  <span class="slide-counter" id="counter">1 / 12</span>
+</div>
+
+<script>
+let current = 1;
+const total = document.querySelectorAll('.slide').length;
+const dotsContainer = document.getElementById('dots');
+const counter = document.getElementById('counter');
+for (let i = 1; i <= total; i++) { const dot = document.createElement('div'); dot.className = 'dot' + (i === 1 ? ' active' : ''); dot.onclick = () => goToSlide(i); dotsContainer.appendChild(dot); }
+function goToSlide(n) { const prev = document.querySelector('.slide.active'); const next = document.querySelector(`.slide[data-slide="${n}"]`); if (prev) prev.classList.remove('active'); if (next) { next.classList.add('active'); animateSlide(next); } current = n; updateNav(); }
+function changeSlide(dir) { let next = current + dir; if (next < 1) next = total; if (next > total) next = 1; goToSlide(next); }
+function updateNav() { document.querySelectorAll('.dot').forEach((d, i) => d.classList.toggle('active', i + 1 === current)); counter.textContent = current + ' / ' + total; }
+document.addEventListener('keydown', (e) => { if (e.key === 'ArrowRight' || e.key === ' ') { e.preventDefault(); changeSlide(1); } if (e.key === 'ArrowLeft') { e.preventDefault(); changeSlide(-1); } });
+let touchStartX = 0; document.addEventListener('touchstart', (e) => { touchStartX = e.touches[0].clientX; }); document.addEventListener('touchend', (e) => { const diff = touchStartX - e.changedTouches[0].clientX; if (Math.abs(diff) > 50) changeSlide(diff > 0 ? 1 : -1); });
+function animateSlide(slide) {
+  slide.querySelectorAll('.reveal').forEach((el, i) => {
+    el.style.transition = 'none'; el.style.opacity = '0'; el.style.transform = 'translateY(20px)'; el.offsetHeight;
+    const delay = i * 0.08; el.style.transition = `opacity 0.35s ease ${delay}s, transform 0.35s ease ${delay}s`; el.style.opacity = '1'; el.style.transform = 'translateY(0px)';
+  });
+  animateSlideEffects(slide);
+}
+function animateSlideEffects(slide) {
+  slide.querySelectorAll('.bar-fill:not(.fill-init)').forEach((bar, i) => { bar.classList.add('fill-init'); bar.style.transition = `width 0.6s ease ${i * 0.08}s`; bar.offsetHeight; bar.style.width = bar.dataset.width + '%'; });
+}
+document.addEventListener('mousemove', (e) => {
+  const spotlight = document.querySelector('.mouse-spotlight');
+  const rgb = getComputedStyle(document.documentElement).getPropertyValue('--glow-color-rgb').trim() || '124,58,237';
+  spotlight.style.background = `radial-gradient(600px circle at ${e.clientX}px ${e.clientY}px, rgba(${rgb}, 0.06), transparent 40%)`;
+});
+window.initParticles = function(canvas, options) {
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  canvas.width = canvas.offsetWidth; canvas.height = canvas.offsetHeight;
+  const interactive = options.interactive !== false; const count = options.count || (interactive ? 55 : 18);
+  let mx = -1000, my = -1000; const rgb = getComputedStyle(document.documentElement).getPropertyValue('--glow-color-rgb').trim() || '124,58,237'; const [r,g,b] = rgb.split(',').map(Number);
+  const particles = Array.from({ length: count }, () => ({ x: Math.random()*canvas.width, y: Math.random()*canvas.height, vx: (Math.random()-0.5)*0.3, vy: (Math.random()-0.5)*0.3, size: Math.random()*2.5+0.8, alpha: Math.random()*0.35+0.1 }));
+  if (interactive) {
+    canvas.addEventListener('mousemove', (e) => { const rect = canvas.getBoundingClientRect(); mx = e.clientX - rect.left; my = e.clientY - rect.top; });
+    canvas.addEventListener('mouseleave', () => { mx = -1000; my = -1000; });
+  }
+  (function animate() {
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+    particles.forEach(p => {
+      if (interactive) { const dx = p.x - mx, dy = p.y - my, dist = Math.sqrt(dx*dx + dy*dy); if (dist < 120 && dist > 0) { const force = (120-dist)/120*2; p.vx += (dx/dist)*force*0.1; p.vy += (dy/dist)*force*0.1; } }
+      p.vx *= 0.98; p.vy *= 0.98; p.x += p.vx; p.y += p.vy;
+      if (p.x < 0) p.x = canvas.width; if (p.x > canvas.width) p.x = 0; if (p.y < 0) p.y = canvas.height; if (p.y > canvas.height) p.y = 0;
+      ctx.beginPath(); ctx.arc(p.x, p.y, p.size, 0, Math.PI*2); ctx.fillStyle = `rgba(${r},${g},${b},${p.alpha})`; ctx.fill();
+    });
+    requestAnimationFrame(animate);
+  })();
+};
+document.querySelectorAll('.particle-canvas').forEach(c => window.initParticles(c, { interactive: true, count: 55 }));
+document.querySelectorAll('.particle-canvas-ambient').forEach(c => window.initParticles(c, { interactive: false, count: 18 }));
+try { animateSlide(document.querySelector('.slide.active')); } catch(e) {}
+</script>
+</body>
+</html>
